@@ -114,6 +114,7 @@ int __clone2(int (*fn)(void *), void *child_stack_base,
 #include "uname.h"
 
 #include "qemu.h"
+#include "qemu/memfd.h"
 
 #define CLONE_NPTL_FLAGS2 (CLONE_SETTLS | \
     CLONE_PARENT_SETTID | CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)
@@ -10006,6 +10007,16 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_NR_unshare) && defined(CONFIG_SETNS)
     case TARGET_NR_unshare:
         ret = get_errno(unshare(arg1));
+        break;
+#endif
+#ifdef TARGET_NR_memfd_create
+    case TARGET_NR_memfd_create:
+        p = lock_user_string(arg1);
+        if (!p)
+	    goto efault;
+        ret = get_errno(memfd_create(p, arg2));
+        fd_trans_unregister(ret);
+        unlock_user(p, arg1, 0);
         break;
 #endif
 
