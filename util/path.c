@@ -32,6 +32,53 @@ void init_paths(const char *prefix)
     qemu_mutex_init(&lock);
 }
 
+/* Use the value from include/linux/namei.h if not provided by libc.  */
+#ifndef MAXSYMLINKS
+#define MAXSYMLINKS 40
+#endif
+
+/* Follow symlinks in a loop.  */
+static char *follow_symlinks(char *path)
+{
+    struct stat buf;
+    int total_link_count = 0;
+
+    while (lstat(path, &buf) == 0 && S_ISLNK(buf.st_mode)) {
+        char *free_me = path;
+        char *target;
+
+        /* Detect symlink loops.  */
+        total_link_count++;
+        if (total_link_count >= MAXSYMLINKS) {
+            g_free(free_me);
+            return NULL;
+        }
+
+        /* Figure out symlink target.  */
+        target = g_file_read_link(path, NULL);
+        if (target == NULL) {
+            g_free(free_me);
+            return NULL;
+        }
+
+        if (target[0] == '/') {
+            /* Absolute target.  */
+            path = g_build_filename(base, target, NULL);
+        } else {
+            /* Relative target.  */
+            char *last_slash = g_strrstr(path, "/");
+
+            assert(last_slash != NULL);
+            *last_slash = '\0';
+            path = g_build_filename(path, target, NULL);
+        }
+
+        g_free(target);
+        g_free(free_me);
+    }
+    return path;
+}
+
 /* Look for path in emulation dir, otherwise return name. */
 const char *path(const char *name)
 {
@@ -52,8 +99,10 @@ const char *path(const char *name)
         char *save = g_strdup(name);
         char *full = g_build_filename(base, name, NULL);
 
+        full = follow_symlinks(full);
+
         /* Look for the path; record the result, pass or fail.  */
-        if (access(full, F_OK) == 0) {
+        if (full != NULL && access(full, F_OK) == 0) {
             /* Exists.  */
             g_hash_table_insert(hash, save, full);
             ret = full;
